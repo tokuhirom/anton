@@ -1,0 +1,205 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+
+Anton::CLI->new()->run(\@ARGV);
+
+package Anton::Snapshot {
+    use Config;
+    use JSON::PP;
+
+    sub new {
+        my $class = shift;
+        bless {
+            outfile => 'anton.cpanfile',
+        }, $class;
+    }
+
+    sub aggregate {
+        my $self = shift;
+
+        my %required;
+
+        LOOP:
+        for my $fname (glob("local/lib/perl5/$Config{archname}/.meta/*/install.json")) {
+            open my $fh, '<', $fname
+                or do {
+                print "[anton] [WARN] Cannot open '$fname' for reading: $!\n";
+                next LOOP;
+            };
+
+            my $json = do { local $/; <$fh> };
+            my $dat = JSON::PP::decode_json($json);
+
+            die "[anton] [ABORT] Missing 'provides' section in $fname" unless $dat->{provides};
+
+            unless ($self->is_installed($dat)) {
+                print "[anton] [debug] $dat->{name} is not installed. Maybe uninstalled.\n";
+                next LOOP;
+            }
+
+            # First, try 'name'.
+            if (my $version = $dat->{provides}->{$dat->{name}}->{version}) {
+                $self->{required}->{$dat->{name}} = $version;
+                next LOOP;
+            }
+
+            # Fallback: Otherwise, use shortest name module.
+            print "[anton] [WARN] $dat->{name} doesn't have a good name. ref. Lancuster consensus.\n";
+            for my $module (sort { length($a) <=> length($b) } keys %{$dat->{provides}}) {
+                my $version = $dat->{provides}->{$module}->{version}
+                    or next;
+                $self->{required}->{$module} = $version;
+                next LOOP;
+            }
+
+            # Hmm.. We can't find any version information in install.json
+            die "[anton] [ABORT] Oops. We can't detect the version from '$fname'. Retired.";
+        }
+    }
+
+    sub is_installed {
+        my ($self, $dat) = @_;
+
+        for my $module (keys %{$dat->{provides}}) {
+            $module =~ s!::!/!g;
+            $module .= ".pm";
+
+            for my $dir ("local/lib/perl5/", "local/lib/perl5/$Config{archname}/") {
+                return 1 if -f "$dir/$module";
+            }
+        }
+        return 0;
+    }
+
+    sub save {
+        my $self = shift;
+
+        open my $fh, '>', $self->{outfile}
+            or die "Cannot open '$self->{outfile}' for writing: $!";
+
+        for my $module (sort keys %{$self->{required}}) {
+            print {$fh} qq{requires "$module", "== $self->{required}->{$module}";\n};
+        }
+
+        close $fh;
+    }
+}
+
+package Anton::CLI {
+    use Pod::Usage;
+    use Getopt::Long;
+
+    sub new {
+        my $class = shift;
+        bless {}, $class;
+    }
+
+    sub run {
+        my ($self, $args) = @_;
+        my $cmd = shift(@$args) || 'help';
+
+        if ($self->can("CMD_${cmd}")) {
+            $self->${\"CMD_${cmd}"}($args);
+        } else {
+            $self->CMD_help();
+        }
+    }
+
+    sub CMD_help {
+        pod2usage(1);
+    }
+
+    sub CMD_install {
+        my ($self, $args) = @_;
+
+        my $deployment = 0;
+
+        my $p = Getopt::Long::Parser->new( config => [ "no_ignore_case" ], );
+        $p->getoptionsfromarray(
+            $args,
+            "deployment!" => \$deployment,
+        );
+
+        if (-f 'anton.cpanfile') {
+            print "[anton] Installing modules from anton.cpanfile\n";
+
+            system("cpanm", '-L', 'local', '--notest', '--no-man-pages', '--cpanfile', 'anton.cpanfile', '--installdeps', '.')
+                == 0 or die "[anton] Retired.\n";
+        }
+
+        unless ($deployment) {
+            system("cpanm", '-L', 'local', '--notest', '--no-man-pages', '--cpanfile', 'cpanfile', '--installdeps', '.')
+                == 0 or die "[anton] Retired.\n";
+
+            $self->rebuild_anton_cpanfile;
+        }
+    }
+
+    sub CMD_index {
+        my ($self, $args) = @_;
+        $self->rebuild_anton_cpanfile;
+    }
+
+    sub CMD_uninstall {
+        my ($self, $args) = @_;
+
+        for my $module (@$args) {
+            system("cpanm", "-L", 'local', '-U', $module);
+        }
+
+        $self->rebuild_anton_cpanfile;
+    }
+
+    sub rebuild_anton_cpanfile {
+        my $self = shift;
+
+        my $snapshot= Anton::Snapshot->new();
+        $snapshot->aggregate();
+        $snapshot->save();
+    }
+}
+
+__END__
+
+=head1 NAME
+
+anton - Yet another CPAN module manager for web applications.
+
+=head1 SYNOPSIS
+
+    > anton install
+
+    > anton uninstall Acme::YakiniQ
+
+=head1 DESCRIPTION
+
+Yet another CPAN module manager for web applications.
+
+=head1 USAGE
+
+=head2 At first time.
+
+You need to write the cpanfile, first.
+
+Then, you run following command:
+
+    > anton install
+
+cpanm installs all dependent modules.
+
+anton generates anton.cpanfile from local/lib/perl5/*/.meta/*/install.json.
+It contains installed module's version information.
+
+You can restore local/ from anton.cpanfile.
+
+=head2 Restore local/ from anton.cpanfile
+
+You can generate original environment's local/ from anton.cpanfile.
+
+    > anton install --deployment
+
+This command install all modules described in anton.cpanfile.
+
+If all restoration is succeeded, exit status is 0.
+If anton gets an error, exit status is non-zero value.
