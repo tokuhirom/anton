@@ -39,3 +39,10 @@ This command install all modules described in anton.cpanfile.
 
 If all restoration is succeeded, exit status is 0.
 If anton gets an error, exit status is non-zero value.
+
+# FAQ
+
+## Is there an \`carton exec\` equivalent command?
+
+There is no \`carton exec\` equivalent subcommand.
+But you can do \`perl -Mlib::core::only -Mlib=lib/perl5/ foo.pl\`.
