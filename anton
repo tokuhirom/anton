@@ -7,6 +7,12 @@ Anton::CLI->new()->run(\@ARGV);
 package Anton::Snapshot {
     use Config;
     use JSON::PP;
+    use ExtUtils::MakeMaker;
+
+    our $IGNORE_RE;
+    BEGIN {
+        $IGNORE_RE = qr{\A(?:testdir|t|xt|local|perl5|fatlib|extras|test|inc|contrib)/};
+    }
 
     sub new {
         my $class = shift;
@@ -21,7 +27,7 @@ package Anton::Snapshot {
         my %required;
 
         LOOP:
-        for my $fname (glob("local/lib/perl5/$Config{archname}/.meta/*/install.json")) {
+        for my $fname (sort glob("local/lib/perl5/$Config{archname}/.meta/*/install.json")) {
             open my $fh, '<', $fname
                 or do {
                 print "[anton] [WARN] Cannot open '$fname' for reading: $!\n";
@@ -34,21 +40,29 @@ package Anton::Snapshot {
             die "[anton] [ABORT] Missing 'provides' section in $fname" unless $dat->{provides};
 
             unless ($self->is_installed($dat)) {
-                print "[anton] [debug] $dat->{name} is not installed. Maybe uninstalled.\n";
+                print "[anton] [debug] $dat->{dist} is not installed. Maybe uninstalled.\n";
                 next LOOP;
             }
 
             # First, try 'name'.
             if (my $version = $dat->{provides}->{$dat->{name}}->{version}) {
+                push @{$self->{modules}}, $dat;
+                if ($self->{required}->{$dat->{name}}) {
+                    warn "Duplicated: $dat->{dist}";
+                }
                 $self->{required}->{$dat->{name}} = $version;
                 next LOOP;
             }
 
             # Fallback: Otherwise, use shortest name module.
+            # 
+            # This section is required for MailTools.
+            # MailTools does not follow Lancustor consensus yet.
             print "[anton] [WARN] $dat->{name} doesn't have a good name. ref. Lancuster consensus.\n";
             for my $module (sort { length($a) <=> length($b) } keys %{$dat->{provides}}) {
                 my $version = $dat->{provides}->{$module}->{version}
                     or next;
+                push @{$self->{modules}}, $dat;
                 $self->{required}->{$module} = $version;
                 next LOOP;
             }
@@ -61,28 +75,179 @@ package Anton::Snapshot {
     sub is_installed {
         my ($self, $dat) = @_;
 
-        for my $module (keys %{$dat->{provides}}) {
-            $module =~ s!::!/!g;
-            $module .= ".pm";
+        # - All modules are installed.
+        # - One or more modules are installed.
+        # - If the file contains a correct package, ignore other package names.
+        #   - Because inner package can't parse by EU::MM#parse_version
 
-            for my $dir ("local/lib/perl5/", "local/lib/perl5/$Config{archname}/") {
-                return 1 if -f "$dir/$module";
-            }
+        my %file2pkgs;
+        for my $package (keys %{$dat->{provides}}) {
+            my $info = $dat->{provides}->{$package};
+            next if $info->{file} =~ $IGNORE_RE;
+            $file2pkgs{$info->{file}}{$package} = $info->{version};
         }
-        return 0;
+
+        FILE_LOOP:
+        while (my ($file, $info) = each %file2pkgs) {
+            while (my ($package, $version) = each %$info) {
+                my $module = $package;
+                $module =~ s!::!/!g;
+                $module .= ".pm";
+
+                for my $dir ("local/lib/perl5/", "local/lib/perl5/$Config{archname}/") {
+                    my $path = "$dir/$module";
+                    if (-f $path) {
+                        my $version = MM->parse_version($path);
+
+                        if (
+                            version->parse($dat->{provides}->{$package}{version} // 0) == version->parse($version // 0)
+                        ) {
+                            next FILE_LOOP;
+                        } else {
+                            next;
+                        }
+                    }
+                }
+            }
+            return 0;
+        }
+        return 1;
     }
 
-    sub save {
+    sub write_mirror_index {
+        my ($self, $mirror) = @_;
+
+        print "[anton] Generating $mirror\n";
+
+        open my $fh, '>', $mirror
+            or die "Cannot open '$mirror' for writing: $!";
+
+        my @modules;
+        for my $module (@{$self->{modules}}) {
+            for my $pkg (sort keys %{$module->{provides}}) {
+                next unless $module->{provides}{$pkg}{file};
+                next if $module->{provides}{$pkg}{file} =~ $IGNORE_RE;
+
+                push @modules, [
+                    $pkg,
+                    $module->{provides}->{$pkg}->{version} || 'undef',
+                    $module->{pathname}
+                ];
+            }
+        }
+        @modules = sort { $a->[0] cmp $b->[0] } @modules;
+
+        print {$fh} "File:         02packages.details.txt\n";
+        print {$fh} "URL:          http://www.perl.com/CPAN/modules/02packages.details.txt\n";
+        print {$fh} "Written-By:   Anton\n";
+        print {$fh} "\n";
+        for (@modules) {
+            printf {$fh} qq{%-32s %-10s %s\n}, @$_;
+        }
+        close $fh;
+    }
+}
+
+package Anton {
+    use File::Spec;
+
+    sub new {
+        my $class = shift;
+        bless {
+            mirror => $ENV{ANTON_CPAN_MIRROR} || 'http://ftp.riken.jp/lang/CPAN/',
+            local  => 'local',
+        }, $class;
+    }
+
+    sub local_mirror_dir {
         my $self = shift;
+        File::Spec->rel2abs("anton");
+    }
 
-        open my $fh, '>', $self->{outfile}
-            or die "Cannot open '$self->{outfile}' for writing: $!";
+    sub local_mirror_uri {
+        my $self = shift;
+        'file://' . $self->local_mirror_dir;
+    }
 
-        for my $module (sort keys %{$self->{required}}) {
-            print {$fh} qq{requires "$module", "== $self->{required}->{$module}";\n};
+    sub index_file {
+        File::Spec->rel2abs('anton/modules/02.packages.details.txt')
+    }
+
+    sub cache_dir { shift->local_mirror_dir }
+
+    sub install {
+        my ($self, %args) = @_;
+
+        if (-f $self->index_file) {
+            printf "[anton] Installing modules with %s\n", $self->index_file;
+
+            $self->run_cmd(
+                "cpanm",
+                '-L' => $self->{local},
+                '--notest',
+                '--no-man-pages',
+                '-v',
+                '--mirror' => $self->local_mirror_uri,
+                '--mirror' => $self->{mirror},
+                '--mirror' => 'http://backpan.perl.org/',
+                '--mirror-index' => $self->index_file,
+                '--mirror-only',
+                '--cpanfile' => 'cpanfile',
+                '--save-dists' => $self->cache_dir,
+                '--installdeps' => '.'
+            );
+        } else {
+            if ($args{deployment}) {
+                die "You specified deployment mode. But there is no index file!\n";
+            }
         }
 
-        close $fh;
+        unless ($args{deployment}) {
+            $self->run_cmd(
+                "cpanm",
+                '-L' => $self->{local},
+                '--mirror' => $self->local_mirror_uri,
+                '--mirror' => $self->{mirror},
+                '--mirror' => 'http://backpan.perl.org/',
+                '--notest',
+                '--no-man-pages',
+                '--save-dists' => $self->cache_dir,
+                '--cpanfile' => 'cpanfile',
+                '--installdeps' => '.'
+            );
+
+            $self->rebuild_index;
+        }
+    }
+
+    sub uninstall {
+        my ($self, %args) = @_;
+
+        for my $module (@{$args{modules}}) {
+            system("cpanm", "-L", 'local', '-U', $module);
+        }
+
+        $self->rebuild_index;
+    }
+
+    sub rebuild_index {
+        my $self = shift;
+
+        my $snapshot = Anton::Snapshot->new();
+        $snapshot->aggregate();
+
+        File::Path::mkpath(File::Basename::dirname($self->index_file));
+        $snapshot->write_mirror_index($self->index_file);
+    }
+
+    sub run_cmd {
+        my ($self, @cmd) = @_;
+        print "[anton] @cmd\n";
+        if ($self->{dry_run}) {
+            print "[anton] DRY RUN\n";
+            return;
+        }
+        system(@cmd) == 0 or die "[anton] Retired.\n";
     }
 }
 
@@ -92,7 +257,7 @@ package Anton::CLI {
 
     sub new {
         my $class = shift;
-        bless {}, $class;
+        bless { }, $class;
     }
 
     sub run {
@@ -119,44 +284,34 @@ package Anton::CLI {
         $p->getoptionsfromarray(
             $args,
             "deployment!" => \$deployment,
+            'dry-run!'    => \my $dry_run,
         );
 
-        if (-f 'anton.cpanfile') {
-            print "[anton] Installing modules from anton.cpanfile\n";
+        my $anton = Anton->new();
+        $anton->{dry_run} = $dry_run;
+        $anton->install(
+            deployment => $deployment,
+        );
+    }
 
-            system("cpanm", '-L', 'local', '--notest', '--no-man-pages', '--cpanfile', 'anton.cpanfile', '--installdeps', '.')
-                == 0 or die "[anton] Retired.\n";
-        }
-
-        unless ($deployment) {
-            system("cpanm", '-L', 'local', '--notest', '--no-man-pages', '--cpanfile', 'cpanfile', '--installdeps', '.')
-                == 0 or die "[anton] Retired.\n";
-
-            $self->rebuild_anton_cpanfile;
-        }
+    sub run_cmd {
+        my ($self, @cmd) = @_;
+        print "[anton] @cmd\n";
+        system(@cmd) == 0 or die "[anton] Retired.\n";
     }
 
     sub CMD_index {
         my ($self, $args) = @_;
-        $self->rebuild_anton_cpanfile;
+
+        my $anton = Anton->new();
+        $anton->rebuild_index();
     }
 
     sub CMD_uninstall {
         my ($self, $args) = @_;
 
-        for my $module (@$args) {
-            system("cpanm", "-L", 'local', '-U', $module);
-        }
-
-        $self->rebuild_anton_cpanfile;
-    }
-
-    sub rebuild_anton_cpanfile {
-        my $self = shift;
-
-        my $snapshot= Anton::Snapshot->new();
-        $snapshot->aggregate();
-        $snapshot->save();
+        my $anton = Anton->new();
+        $anton->uninstall(modules => $args);
     }
 }
 
@@ -184,11 +339,12 @@ You need to write the cpanfile, first.
 
 Then, you run following command:
 
+    > echo '/anton/authors/' >> .gitignore
     > anton install
 
 cpanm installs all dependent modules.
 
-anton generates anton.cpanfile from local/lib/perl5/*/.meta/*/install.json.
+Anton generates anton/modules/02.packages.details.txt from local/lib/perl5/*/.meta/*/install.json.
 It contains installed module's version information.
 
 You can restore local/ from anton.cpanfile.
@@ -210,4 +366,3 @@ If anton gets an error, exit status is non-zero value.
 
 There is no `carton exec` equivalent subcommand.
 But you can do `perl -Mlib::core::only -Mlib=lib/perl5/ foo.pl`.
-
