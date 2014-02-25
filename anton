@@ -18,6 +18,11 @@ package Anton::Snapshot {
         my $class = shift;
         bless {
             outfile => 'anton.cpanfile',
+            ignore => {
+                # Imager::File::PNG included in Imager-File-PNG-XXX.tar.gz and Imager-XXX.tar.gz. Very confusing.
+                'Imager::File::JPEG' => 1,
+                'Imager::File::PNG'  => 1,
+            },
         }, $class;
     }
 
@@ -127,6 +132,7 @@ package Anton::Snapshot {
             for my $pkg (sort keys %{$module->{provides}}) {
                 next unless $module->{provides}{$pkg}{file};
                 next if $module->{provides}{$pkg}{file} =~ $IGNORE_RE;
+                next if $self->{ignore}{$pkg};
 
                 push @modules, [
                     $pkg,
