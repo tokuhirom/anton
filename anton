@@ -159,11 +159,15 @@ package Anton {
 
     sub new {
         my $class = shift;
+        my %args = @_==1 ? %{$_[0]} : @_;
         bless {
             mirror => $ENV{ANTON_CPAN_MIRROR} || 'http://ftp.riken.jp/lang/CPAN/',
             local  => 'local',
+            %args,
         }, $class;
     }
+
+    sub verbose { shift->{verbose} }
 
     sub local_mirror_dir {
         my $self = shift;
@@ -192,7 +196,6 @@ package Anton {
                 '-L' => $self->{local},
                 '--notest',
                 '--no-man-pages',
-                '-v',
                 '--mirror' => $self->local_mirror_uri,
                 '--mirror' => $self->{mirror},
                 '--mirror' => 'http://backpan.perl.org/',
@@ -200,6 +203,7 @@ package Anton {
                 '--mirror-only',
                 '--cpanfile' => 'cpanfile',
                 '--save-dists' => $self->cache_dir,
+                ($self->verbose ? ('--verbose') : ()),
                 '--installdeps' => '.'
             );
         } else {
@@ -219,6 +223,7 @@ package Anton {
                 '--no-man-pages',
                 '--save-dists' => $self->cache_dir,
                 '--cpanfile' => 'cpanfile',
+                ($self->verbose ? ('--verbose') : ()),
                 '--installdeps' => '.'
             );
 
@@ -291,10 +296,13 @@ package Anton::CLI {
             $args,
             "deployment!" => \$deployment,
             'dry-run!'    => \my $dry_run,
+            'v|verbose!'  => \my $verbose,
         );
 
-        my $anton = Anton->new();
-        $anton->{dry_run} = $dry_run;
+        my $anton = Anton->new(
+            dry_run => $dry_run,
+            verbose => $verbose,
+        );
         $anton->install(
             deployment => $deployment,
         );
