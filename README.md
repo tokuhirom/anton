@@ -20,11 +20,12 @@ You need to write the cpanfile, first.
 
 Then, you run following command:
 
+    > echo '/anton/authors/' >> .gitignore
     > anton install
 
 cpanm installs all dependent modules.
 
-anton generates anton.cpanfile from local/lib/perl5/\*/.meta/\*/install.json.
+Anton generates anton/modules/02.packages.details.txt from local/lib/perl5/\*/.meta/\*/install.json.
 It contains installed module's version information.
 
 You can restore local/ from anton.cpanfile.
