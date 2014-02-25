@@ -163,9 +163,12 @@ package Anton {
         bless {
             mirror => $ENV{ANTON_CPAN_MIRROR} || 'http://ftp.riken.jp/lang/CPAN/',
             local  => 'local',
+            cpanfile => 'cpanfile',
             %args,
         }, $class;
     }
+
+    sub cpanfile { shift->{cpanfile} }
 
     sub verbose { shift->{verbose} }
 
@@ -188,6 +191,10 @@ package Anton {
     sub install {
         my ($self, %args) = @_;
 
+        unless (-f $self->cpanfile) {
+            die "[anton] There is no cpanfile. Retried.\n";
+        }
+
         if (-f $self->index_file) {
             printf "[anton] Installing modules with %s\n", $self->index_file;
 
@@ -201,7 +208,7 @@ package Anton {
                 '--mirror' => 'http://backpan.perl.org/',
                 '--mirror-index' => $self->index_file,
                 '--mirror-only',
-                '--cpanfile' => 'cpanfile',
+                '--cpanfile' => $self->cpanfile,
                 '--save-dists' => $self->cache_dir,
                 ($self->verbose ? ('--verbose') : ()),
                 '--installdeps' => '.'
@@ -222,7 +229,7 @@ package Anton {
                 '--notest',
                 '--no-man-pages',
                 '--save-dists' => $self->cache_dir,
-                '--cpanfile' => 'cpanfile',
+                '--cpanfile' => $self->cpanfile,
                 ($self->verbose ? ('--verbose') : ()),
                 '--installdeps' => '.'
             );
