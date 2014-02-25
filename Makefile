@@ -1,4 +1,7 @@
 all:
 	pod2markdown < anton > README.md
 
-.PHONY: all
+test:
+	prove -lrv t
+
+.PHONY: all test
