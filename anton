@@ -214,13 +214,13 @@ package Anton {
         my @repos = $self->darkpan_repos_from_cpanfile;
         return unless @repos;
 
-        my $dpindex = $self->read_darkpan_json;
+        my $cache = $self->read_darkpan_cache;
         my $modified_darkpan = 0;
         for my $repo (@repos) {
             $self->debugf("Checking $repo");
 
             # Is there the dist file?
-            my $mod = $dpindex->{$repo};
+            my $mod = $cache->{$repo};
             my $need_rebuild = sub {
                 return 1 unless $mod;
                 return 1 unless $mod->{file};
@@ -233,7 +233,7 @@ package Anton {
                 return 0;
             }->();
             if ($need_rebuild) {
-                $dpindex->{$repo} = $self->inject_to_darkpan($repo, $mod);
+                $cache->{$repo} = $self->inject_to_darkpan($repo, $mod);
                 $modified_darkpan++;
             } else {
                 $self->debugf("${repo} is fresh.");
@@ -243,7 +243,7 @@ package Anton {
         return unless $modified_darkpan;
 
         # write anton/darkpan.json
-        $self->atomic_write('anton/darkpan.json', JSON::PP->new->pretty(1)->canonical(1)->encode($dpindex));
+        $self->atomic_write('anton/darkpan/cache.json', JSON::PP->new->pretty(1)->canonical(1)->encode($cache));
 
         # Make darkpan index.
         require OrePAN2::Indexer;
@@ -305,12 +305,11 @@ package Anton {
         };
     }
 
-    # Read anton/darkpan.json
-    sub read_darkpan_json {
+    sub read_darkpan_cache {
         my $self = shift;
-        return +{ } unless -r 'anton/darkpan.json';
+        return +{ } unless -r 'anton/darkpan/cache.json';
 
-        open my $fh, '<', 'anton/darkpan.json'
+        open my $fh, '<', 'anton/darkpan/cache.json'
             or return +{};
         return JSON::PP::decode_json(do { local $/; <$fh> });
     }
