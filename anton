@@ -221,22 +221,22 @@ package Anton {
 
             # Is there the dist file?
             my $mod = $cache->{$repo};
-            my $need_rebuild = sub {
-                return 1 unless $mod;
-                return 1 unless $mod->{file};
-                return 1 unless $mod->{md5hex};
-                return 1 unless -r $mod->{file};
+            my $hit_cache = sub {
+                return 0 unless $mod;
+                return 0 unless $mod->{file};
+                return 0 unless $mod->{md5hex};
+                return 0 unless -r $mod->{file};
 
                 my $md5 = $self->calc_md5($mod->{file});
-                return 1 unless $md5;
-                return 1 if $md5 ne $mod->{md5hex};
-                return 0;
+                return 0 unless $md5;
+                return 0 if $md5 ne $mod->{md5hex};
+                return 1;
             }->();
-            if ($need_rebuild) {
+            if ($hit_cache) {
+                $self->debugf("${repo} is fresh.");
+            } else {
                 $cache->{$repo} = $self->inject_to_darkpan($repo, $mod);
                 $modified_darkpan++;
-            } else {
-                $self->debugf("${repo} is fresh.");
             }
         }
 
