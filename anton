@@ -15,7 +15,6 @@ package Anton::Snapshot {
     sub new {
         my $class = shift;
         bless {
-            outfile => 'anton.cpanfile',
             ignore => {
                 # Imager::File::PNG included in Imager-File-PNG-XXX.tar.gz and Imager-XXX.tar.gz. Very confusing.
                 'Imager::File::JPEG' => 1,
@@ -24,54 +23,48 @@ package Anton::Snapshot {
         }, $class;
     }
 
-    sub aggregate {
+    sub json_files {
         my $self = shift;
+        sort glob("local/lib/perl5/$Config{archname}/.meta/*/install.json");
+    }
+
+    sub load_json {
+        my $fname = shift;
+
+        open my $fh, '<', $fname
+            or do {
+            print "[anton] [WARN] Cannot open '$fname' for reading: $!\n";
+            return;
+        };
+
+        my $json = do { local $/; <$fh> };
+        return JSON::PP::decode_json($json);
+    }
+
+    sub aggregate {
+        my ($self, $index) = @_;
 
         my %required;
 
-        LOOP:
-        for my $fname (sort glob("local/lib/perl5/$Config{archname}/.meta/*/install.json")) {
-            open my $fh, '<', $fname
-                or do {
-                print "[anton] [WARN] Cannot open '$fname' for reading: $!\n";
-                next LOOP;
-            };
+        my @modules = (
+            grep { $self->is_installed($_) }
+            grep { defined $_ }
+            map { load_json($_) }
+            $self->json_files
+        );
 
-            my $json = do { local $/; <$fh> };
-            my $dat = JSON::PP::decode_json($json);
+        for my $module (@modules) {
+            for my $pkg (sort keys %{$module->{provides}}) {
+                next unless $module->{provides}{$pkg}{file};
+                next if $module->{provides}{$pkg}{file} =~ $IGNORE_RE;
+                next if $self->{ignore}{$pkg};
 
-            die "[anton] [ABORT] Missing 'provides' section in $fname" unless $dat->{provides};
-
-            unless ($self->is_installed($dat)) {
-                print "[anton] [debug] $dat->{dist} is not installed. Maybe uninstalled.\n";
-                next LOOP;
+                $index->add_index(
+                    $pkg,
+                    $module->{provides}->{$pkg}->{version},
+                    $module->{pathname}
+                );
             }
-
-            # First, try 'name'.
-            if (my $version = $dat->{provides}->{$dat->{name}}->{version}) {
-                push @{$self->{modules}}, $dat;
-                if ($self->{required}->{$dat->{name}}) {
-                    warn "Duplicated: $dat->{dist}";
-                }
-                $self->{required}->{$dat->{name}} = $version;
-                next LOOP;
-            }
-
-            # Fallback: Otherwise, use shortest name module.
-            # 
-            # This section is required for MailTools.
-            # MailTools does not follow Lancustor consensus yet.
-            print "[anton] [WARN] $dat->{name} doesn't have a good name. ref. Lancuster consensus.\n";
-            for my $module (sort { length($a) <=> length($b) } keys %{$dat->{provides}}) {
-                my $version = $dat->{provides}->{$module}->{version}
-                    or next;
-                push @{$self->{modules}}, $dat;
-                $self->{required}->{$module} = $version;
-                next LOOP;
-            }
-
-            # Hmm.. We can't find any version information in install.json
-            die "[anton] [ABORT] Oops. We can't detect the version from '$fname'. Retired.";
         }
     }
 
@@ -115,31 +108,6 @@ package Anton::Snapshot {
             return 0;
         }
         return 1;
-    }
-
-    sub make_index {
-        my ($self) = @_;
-
-        require OrePAN2::Index;
-
-        my $index = OrePAN2::Index->new();
-        $index->no_mtime(1);
-
-        my @modules;
-        for my $module (@{$self->{modules}}) {
-            for my $pkg (sort keys %{$module->{provides}}) {
-                next unless $module->{provides}{$pkg}{file};
-                next if $module->{provides}{$pkg}{file} =~ $IGNORE_RE;
-                next if $self->{ignore}{$pkg};
-
-                $index->add_index(
-                    $pkg,
-                    $module->{provides}->{$pkg}->{version},
-                    $module->{pathname}
-                );
-            }
-        }
-        return $index;
     }
 }
 
@@ -376,10 +344,13 @@ package Anton {
     sub rebuild_index {
         my $self = shift;
 
-        my $snapshot = Anton::Snapshot->new();
-        $snapshot->aggregate();
+        require OrePAN2::Index;
+        my $index = OrePAN2::Index->new();
+        $index->no_mtime(1);
 
-        my $index = $snapshot->make_index();
+        my $snapshot = Anton::Snapshot->new();
+        $snapshot->aggregate($index);
+
         if (-f $self->darkpan_index_file) {
             $index->load($self->darkpan_index_file, {replace=>1});
         }
@@ -596,15 +567,15 @@ cpanm installs all dependent modules.
 Anton generates anton/modules/02.packages.details.txt from local/lib/perl5/*/.meta/*/install.json.
 It contains installed module's version information.
 
-You can restore local/ from anton.cpanfile.
+You can restore local/ from anton/index.txt.
 
-=head2 Restore local/ from anton.cpanfile
+=head2 Restore local/ from anton/index.txt
 
-You can generate original environment's local/ from anton.cpanfile.
+You can generate original environment's local/ from anton/index.txt.
 
     > anton install --deployment
 
-This command install all modules described in anton.cpanfile.
+This command install all modules described in anton/index.txt.
 
 If all restoration is succeeded, exit status is 0.
 If anton gets an error, exit status is non-zero value.
