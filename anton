@@ -2,8 +2,6 @@
 use strict;
 use warnings;
 
-Anton::CLI->new()->run(\@ARGV);
-
 package Anton::Snapshot {
     use Config;
     use JSON::PP;
@@ -11,7 +9,7 @@ package Anton::Snapshot {
 
     our $IGNORE_RE;
     BEGIN {
-        $IGNORE_RE = qr{\A(?:testdir|t|xt|local|perl5|fatlib|extras|test|inc|contrib)/};
+        $IGNORE_RE = qr{\A(?:testdir|t|xt|local|perl5|fatlib|extras|test|inc|contrib|_build)/};
     }
 
     sub new {
@@ -119,13 +117,13 @@ package Anton::Snapshot {
         return 1;
     }
 
-    sub write_mirror_index {
-        my ($self, $mirror) = @_;
+    sub make_index {
+        my ($self) = @_;
 
-        print "[anton] Generating $mirror\n";
+        require OrePAN2::Index;
 
-        open my $fh, '>', $mirror
-            or die "Cannot open '$mirror' for writing: $!";
+        my $index = OrePAN2::Index->new();
+        $index->no_mtime(1);
 
         my @modules;
         for my $module (@{$self->{modules}}) {
@@ -134,28 +132,20 @@ package Anton::Snapshot {
                 next if $module->{provides}{$pkg}{file} =~ $IGNORE_RE;
                 next if $self->{ignore}{$pkg};
 
-                push @modules, [
+                $index->add_index(
                     $pkg,
-                    $module->{provides}->{$pkg}->{version} || 'undef',
+                    $module->{provides}->{$pkg}->{version},
                     $module->{pathname}
-                ];
+                );
             }
         }
-        @modules = sort { $a->[0] cmp $b->[0] } @modules;
-
-        print {$fh} "File:         02packages.details.txt\n";
-        print {$fh} "URL:          http://www.perl.com/CPAN/modules/02packages.details.txt\n";
-        print {$fh} "Written-By:   Anton\n";
-        print {$fh} "\n";
-        for (@modules) {
-            printf {$fh} qq{%-32s %-10s %s\n}, @$_;
-        }
-        close $fh;
+        return $index;
     }
 }
 
 package Anton {
     use File::Spec;
+    use File::Temp;
 
     sub new {
         my $class = shift;
@@ -174,7 +164,7 @@ package Anton {
 
     sub local_mirror_dir {
         my $self = shift;
-        File::Spec->rel2abs("anton");
+        File::Spec->rel2abs("anton/mirror/");
     }
 
     sub local_mirror_uri {
@@ -182,8 +172,13 @@ package Anton {
         'file://' . $self->local_mirror_dir;
     }
 
+    sub darkpan_uri {
+        my $self = shift;
+        'file://' . File::Spec->rel2abs('anton/darkpan');
+    }
+
     sub index_file {
-        File::Spec->rel2abs('anton/modules/02.packages.details.txt')
+        File::Spec->rel2abs('anton/index.txt')
     }
 
     sub cache_dir { shift->local_mirror_dir }
@@ -195,6 +190,10 @@ package Anton {
             die "[anton] There is no cpanfile. Retried.\n";
         }
 
+        # Make darkpan from anton/darkpan.txt
+        $self->make_darkpan;
+
+        # Re-create local/ directory using index file.
         if (-f $self->index_file) {
             printf "[anton] Installing modules with %s\n", $self->index_file;
 
@@ -203,6 +202,7 @@ package Anton {
                 '-L' => $self->{local},
                 '--notest',
                 '--no-man-pages',
+                '--mirror' => $self->darkpan_uri,
                 '--mirror' => $self->local_mirror_uri,
                 '--mirror' => $self->{mirror},
                 '--mirror' => 'http://backpan.perl.org/',
@@ -219,10 +219,12 @@ package Anton {
             }
         }
 
+        # Install dependent modules, and update index file.
         unless ($args{deployment}) {
             $self->run_cmd(
                 "cpanm",
                 '-L' => $self->{local},
+                '--mirror' => $self->darkpan_uri,
                 '--mirror' => $self->local_mirror_uri,
                 '--mirror' => $self->{mirror},
                 '--mirror' => 'http://backpan.perl.org/',
@@ -238,6 +240,127 @@ package Anton {
         }
     }
 
+    sub make_darkpan {
+        my $self = shift;
+
+        my @repos = $self->darkpan_repos_from_cpanfile;
+        return unless @repos;
+
+        my $dpindex = $self->read_darkpan_json;
+        my $modified_darkpan = 0;
+        for my $repo (@repos) {
+            $self->debugf("Checking $repo");
+
+            # Is there the dist file?
+            my $mod = $dpindex->{$repo};
+            my $need_rebuild = sub {
+                return 1 unless $mod;
+                return 1 unless $mod->{file};
+                return 1 unless $mod->{md5hex};
+                return 1 unless -r $mod->{file};
+
+                my $md5 = $self->calc_md5($mod->{file});
+                return 1 unless $md5;
+                return 1 if $md5 ne $mod->{md5hex};
+                return 0;
+            }->();
+            if ($need_rebuild) {
+                $dpindex->{$repo} = $self->inject_to_darkpan($repo, $mod);
+                $modified_darkpan++;
+            } else {
+                $self->debugf("${repo} is fresh.");
+            }
+        }
+
+        return unless $modified_darkpan;
+
+        # write anton/darkpan.json
+        $self->atomic_write('anton/darkpan.json', JSON::PP->new->pretty(1)->canonical(1)->encode($dpindex));
+
+        # Make darkpan index.
+        require OrePAN2::Indexer;
+        my $indexer = OrePAN2::Indexer->new(
+            directory => 'anton/darkpan',
+        );
+        $indexer->make_index;
+
+        # regen. index.
+        if (-f $self->darkpan_index_file) {
+            $self->rebuild_index();
+        }
+    }
+
+    sub atomic_write {
+        my ($self, $filename, $content) = @_;
+
+        $self->debugf("Writing ${filename}");
+        File::Path::mkpath(File::Basename::dirname($filename));
+
+        require IO::File::AtomicChange;
+        my $fh = IO::File::AtomicChange->new($filename, 'w');
+        $fh->print($content);
+        $fh->close(); # MUST CALL close EXPLICITLY
+    }
+
+    sub calc_md5 {
+        my ($self, $filename) = @_;
+
+        open my $fh, '<', $filename
+            or do {
+            $self->warnf("Cannot open '$filename' for writing: $!");
+            return;
+        };
+
+        require Digest::MD5;
+        my $md5 = Digest::MD5->new();
+        $md5->addfile($fh);
+        $md5->hexdigest;
+    }
+
+    sub inject_to_darkpan {
+        my ($self, $repo) = @_;
+
+        require OrePAN2::Injector;
+
+        my $inject = OrePAN2::Injector->new(directory => 'anton/darkpan');
+        my $tarpath = $inject->inject($repo);
+        $self->infof("Generated $tarpath from $repo");
+
+        my $file = "anton/darkpan/$tarpath";
+
+        +{
+            file => $file,
+            md5hex => $self->calc_md5($file),
+        };
+    }
+
+    # Read anton/darkpan.json
+    sub read_darkpan_json {
+        my $self = shift;
+        return +{ } unless -r 'anton/darkpan.json';
+
+        open my $fh, '<', 'anton/darkpan.json'
+            or return +{};
+        return JSON::PP::decode_json(do { local $/; <$fh> });
+    }
+
+    sub darkpan_repos_from_cpanfile {
+        my $self = shift;
+
+        require Module::CPANfile;
+
+        my $cpanfile = Module::CPANfile->load('cpanfile');
+
+        my @repos;
+        for my $module ($cpanfile->prereqs->merged_requirements->required_modules) {
+            my $opts = $cpanfile->options_for_module($module);
+            if ($opts->{git}) {
+                push @repos, $opts->{git} . '@' . $opts->{ref};
+            }
+        }
+        return @repos;
+    }
+
     sub uninstall {
         my ($self, %args) = @_;
 
@@ -248,38 +371,146 @@ package Anton {
         $self->rebuild_index;
     }
 
+    sub darkpan_index_file { 'anton/darkpan/modules/02packages.details.txt.gz' }
+
     sub rebuild_index {
         my $self = shift;
 
         my $snapshot = Anton::Snapshot->new();
         $snapshot->aggregate();
 
-        File::Path::mkpath(File::Basename::dirname($self->index_file));
-        $snapshot->write_mirror_index($self->index_file);
+        my $index = $snapshot->make_index();
+        if (-f $self->darkpan_index_file) {
+            $index->load($self->darkpan_index_file, {replace=>1});
+        }
+
+        $self->atomic_write($self->index_file, $index->as_string);
     }
 
     sub run_cmd {
         my ($self, @cmd) = @_;
-        print "[anton] @cmd\n";
+
+        $self->infof("@cmd");
         if ($self->{dry_run}) {
-            print "[anton] DRY RUN\n";
+            $self->infof("DRY RUN");
             return;
         }
-        system(@cmd) == 0 or die "[anton] Retired.\n";
+        system(@cmd) == 0 or $self->croakf("Retired.");
+    }
+
+    sub write_gitignore_file {
+        my $self = shift;
+
+        my $filename = 'anton/.gitignore';
+        unless (-f $filename) {
+            $self->atomic_write(
+                $filename,
+                join("\n",
+                    '/darkpan/',
+                    '/mirror/',
+                    '/selfdeps/',
+                )
+            );
+        }
+    }
+
+    my $colored = -t *STDOUT && eval "require Term::ANSIColor;1;" ? \&Term::ANSIColor::colored : sub { $_[1] };
+
+    sub infof {
+        my ($self, $fmt, @args) = @_;
+        my $str = sprintf($fmt, @args);
+        $str = $colored->(['blue'], $str);
+        printf "[info] %s\n", $str;
+    }
+
+    sub croakf {
+        my ($self, $fmt, @args) = @_;
+        my $str = sprintf($fmt, @args);
+        $str = $colored->(['red'], $str);
+        Carp::croak(sprintf "[die] %s\n", $str);
+    }
+
+    sub warnf {
+        my ($self, $fmt, @args) = @_;
+        my $str = sprintf($fmt, @args);
+        $str = $colored->(['yellow'], $str);
+        printf "[warn] %s\n", $str;
+    }
+
+    sub debugf {
+        my ($self, $fmt, @args) = @_;
+        return unless $self->{debug};
+
+        my $str = sprintf($fmt, @args);
+        $str = $colored->(['green'], $str);
+        printf "[debug] %s\n", $str;
     }
 }
 
 package Anton::CLI {
     use Pod::Usage;
     use Getopt::Long;
+    use lib;
+    use version;
 
     sub new {
-        my $class = shift;
-        bless { }, $class;
+        my ($class, $args) = @_;
+        my $self = bless {
+            args => $args,
+        }, $class;
+        $self->{anton} = $self->_build_anton();
+        return $self;
+    }
+
+    sub anton { shift->{anton} }
+
+    sub _build_anton {
+        my $self = shift;
+
+        my $p = Getopt::Long::Parser->new(
+            config => [ "no_ignore_case", 'pass_through' ],
+        );
+        my $debug = $ENV{ANTON_DEBUG};
+        $p->getoptionsfromarray(
+            $self->{args},
+            'dry-run!'    => \my $dry_run,
+            'v|verbose!'  => \my $verbose,
+            'debug!'      => \$debug,
+        );
+        return Anton->new(
+            dry_run => $dry_run,
+            verbose => $verbose,
+            debug   => $debug,
+        );
+    }
+
+    sub bootstrap {
+        my $self = shift;
+
+        $self->anton->debugf("bootstrapping...");
+
+        my $tmp = File::Temp->new();
+        $tmp->print("requires 'File::pushd', '1.005';\n");
+        $tmp->print("requires 'OrePAN2', '0.20';\n");
+        $tmp->print("requires 'IO::File::AtomicChange', '0.05';\n");
+        $tmp->print("requires 'Module::CPANfile', '1.0905';\n");
+        $tmp->close;
+
+        $self->anton->run_cmd(
+            'cpanm', '--quiet', '--dev', '--notest', '--no-man-pages',
+            '-l', 'anton/selfdeps', '--cpanfile', $tmp->filename, '--installdeps',
+            '.',
+        );
+
+        lib->import(File::Spec->rel2abs('anton/selfdeps/lib/perl5/'));
+        $self->anton->debugf("Finished bootstrapping.");
+
+        $self->anton->write_gitignore_file();
     }
 
     sub run {
-        my ($self, $args) = @_;
+        my ($self) = @_;
+        my $args = $self->{args};
         my $cmd = shift(@$args) || 'help';
 
         if ($self->can("CMD_${cmd}")) {
@@ -294,38 +525,25 @@ package Anton::CLI {
     }
 
     sub CMD_install {
-        my ($self, $args) = @_;
+        my ($self) = @_;
 
         my $deployment = 0;
 
         my $p = Getopt::Long::Parser->new( config => [ "no_ignore_case" ], );
         $p->getoptionsfromarray(
-            $args,
+            $self->{args},
             "deployment!" => \$deployment,
-            'dry-run!'    => \my $dry_run,
-            'v|verbose!'  => \my $verbose,
         );
 
-        my $anton = Anton->new(
-            dry_run => $dry_run,
-            verbose => $verbose,
-        );
-        $anton->install(
+        $self->{anton}->install(
             deployment => $deployment,
         );
-    }
-
-    sub run_cmd {
-        my ($self, @cmd) = @_;
-        print "[anton] @cmd\n";
-        system(@cmd) == 0 or die "[anton] Retired.\n";
     }
 
     sub CMD_index {
         my ($self, $args) = @_;
 
-        my $anton = Anton->new();
-        $anton->rebuild_index();
+        $self->{anton}->rebuild_index();
     }
 
     sub CMD_uninstall {
@@ -335,6 +553,13 @@ package Anton::CLI {
         $anton->uninstall(modules => $args);
     }
 }
+
+{
+    my $cli = Anton::CLI->new(\@ARGV);
+    $cli->bootstrap();
+    $cli->run();
+}
+
 
 __END__
 
@@ -348,6 +573,10 @@ anton - Yet another CPAN module manager for web applications.
 
     > anton uninstall Acme::YakiniQ
 
+=head1 DEVELOPMENT STATUS
+
+Unstable.
+
 =head1 DESCRIPTION
 
 Yet another CPAN module manager for web applications.
@@ -360,7 +589,6 @@ You need to write the cpanfile, first.
 
 Then, you run following command:
 
-    > echo '/anton/authors/' >> .gitignore
     > anton install
 
 cpanm installs all dependent modules.
@@ -380,6 +608,18 @@ This command install all modules described in anton.cpanfile.
 
 If all restoration is succeeded, exit status is 0.
 If anton gets an error, exit status is non-zero value.
+
+=head1 Directory structure
+
+    - cpanfile
+    + anton
+        - darkpan.txt
+        + darkpan
+            + authors
+            + dists
+        + dists
+            - 02.packages.details.txt
+        + authors
 
 =head1 FAQ
 
