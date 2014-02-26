@@ -493,6 +493,12 @@ package Anton::CLI {
         );
 
         lib->import(File::Spec->rel2abs('anton/selfdeps/lib/perl5/'));
+
+        # Force reload to latest verison.
+        # 1.33 or later is required by CPAN::Meta::Converter
+        delete $INC{"List/Util.pm"};
+        require List::Util;
+
         $self->anton->debugf("Finished bootstrapping.");
 
         $self->anton->write_gitignore_file();
