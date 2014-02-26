@@ -149,7 +149,29 @@ package Anton {
         File::Spec->rel2abs('anton/index.txt')
     }
 
+    sub merged_index_file {
+        File::Spec->rel2abs('anton/merged.txt')
+    }
+
     sub cache_dir { shift->local_mirror_dir }
+
+    sub build_merged_index {
+        my $self = shift;
+
+        $self->infof("Building merged index");
+
+        require OrePAN2::Index;
+        my $index = OrePAN2::Index->new(
+            no_mtime => 1,
+        );
+        if (-f $self->index_file) {
+            $index->load($self->index_file);
+        }
+        if (-f $self->darkpan_index_file) {
+            $index->load($self->darkpan_index_file, { replace => 1 });
+        }
+        $self->atomic_write($self->merged_index_file, $index->as_string());
+    }
 
     sub install {
         my ($self, %args) = @_;
@@ -160,6 +182,8 @@ package Anton {
 
         # Make darkpan from anton/darkpan.txt
         $self->make_darkpan;
+
+        $self->build_merged_index();
 
         # Re-create local/ directory using index file.
         if (-f $self->index_file) {
@@ -174,7 +198,7 @@ package Anton {
                 '--mirror' => $self->local_mirror_uri,
                 '--mirror' => $self->{mirror},
                 '--mirror' => 'http://backpan.perl.org/',
-                '--mirror-index' => $self->index_file,
+                '--mirror-index' => $self->merged_index_file,
                 '--mirror-only',
                 '--cpanfile' => $self->cpanfile,
                 '--save-dists' => $self->cache_dir,
@@ -196,6 +220,8 @@ package Anton {
                 '--mirror' => $self->local_mirror_uri,
                 '--mirror' => $self->{mirror},
                 '--mirror' => 'http://backpan.perl.org/',
+                '--mirror-index' => $self->merged_index_file,
+                '--cascade-search',
                 '--notest',
                 '--no-man-pages',
                 '--save-dists' => $self->cache_dir,
@@ -251,11 +277,6 @@ package Anton {
             directory => 'anton/darkpan',
         );
         $indexer->make_index;
-
-        # regen. index.
-        if (-f $self->darkpan_index_file) {
-            $self->rebuild_index();
-        }
     }
 
     sub atomic_write {
@@ -352,11 +373,6 @@ package Anton {
 
         my $snapshot = Anton::Snapshot->new();
         $snapshot->aggregate($index);
-
-        if (-f $self->darkpan_index_file) {
-            $index->load($self->darkpan_index_file, {replace=>1});
-        }
-
         $self->atomic_write($self->index_file, $index->as_string);
     }
 
@@ -382,6 +398,7 @@ package Anton {
                     '/darkpan/',
                     '/mirror/',
                     '/selfdeps/',
+                    '/merged.txt',
                 )
             );
         }
