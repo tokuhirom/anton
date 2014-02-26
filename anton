@@ -295,6 +295,9 @@ package Anton {
         $self->infof("Generated $tarpath from $repo");
 
         my $file = "anton/darkpan/$tarpath";
+        unless (-f $file) {
+            $self->croakf("There is no $file");
+        }
 
         +{
             file => $file,
