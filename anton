@@ -465,7 +465,7 @@ package Anton::CLI {
 
         my $tmp = File::Temp->new();
         $tmp->print("requires 'File::pushd', '1.005';\n");
-        $tmp->print("requires 'OrePAN2', '0.20';\n");
+        $tmp->print("requires 'OrePAN2', '0.21';\n");
         $tmp->print("requires 'IO::File::AtomicChange', '0.05';\n");
         $tmp->print("requires 'Module::CPANfile', '1.0905';\n");
         $tmp->close;
