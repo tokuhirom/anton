@@ -1,0 +1,4 @@
+requires 'Scalar::DDie';
+requires 'Acme::Kensiro', '==0.13',
+    git => 'git://github.com/tokuhirom/Acme-Kensiro.git', ref => '0.13';
+
