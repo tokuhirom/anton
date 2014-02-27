@@ -141,14 +141,16 @@ package CPAN::Installed::Local {
                     my $path = "$dir/$module";
                     if (-f $path) {
                         my $version = MM->parse_version($path);
+                        my $meta_version = $dat->{provides}{$package}{version};
+                        next unless defined $version;
+                        next unless defined $meta_version;
 
-                        if (
-                            version->parse($dat->{provides}->{$package}{version} // 0) == version->parse($version // 0)
-                        ) {
+                        if (version->parse($version) == version->parse($meta_version)) {
                             $matched++;
                             next FILE_LOOP;
                         } else {
-                            next;
+                            # Has different version
+                            return 0;
                         }
                     }
                 }
