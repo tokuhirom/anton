@@ -2,6 +2,36 @@
 use strict;
 use warnings;
 
+# bootstrapping...
+#
+# Do not load any modules before bootstrapping.
+BEGIN {
+    # mkdir -p anton/
+    mkdir 'anton';
+    mkdir 'anton/selfdeps/';
+
+    # Write cpanfile for bootstrapping deps.
+    my $cpanfile = 'anton/selfdeps/cpanfile';
+    open my $fh, '>', $cpanfile
+        or die "$cpanfile: $!";
+    print {$fh} join("\n",
+        "requires 'File::pushd', '1.005';",
+        "requires 'OrePAN2', '0.21';",
+        "requires 'IO::File::AtomicChange', '0.05';",
+        "requires 'Module::CPANfile', '1.0905';",
+    );
+    close $fh;
+
+    my @cmd = (
+        'cpanm', '--quiet', '--dev', '--notest', '--no-man-pages',
+        '-l', 'anton/selfdeps', '--cpanfile', $cpanfile, '--installdeps',
+        '.',
+    );
+    system(@cmd) == 0 or die "Cannot install bootstrapping deps";
+}
+use File::Spec;
+use lib File::Spec->rel2abs('anton/selfdeps/lib/perl5/');
+
 package Anton::Snapshot {
     use Config;
     use JSON::PP;
@@ -474,36 +504,6 @@ package Anton::CLI {
         );
     }
 
-    sub bootstrap {
-        my $self = shift;
-
-        $self->anton->debugf("bootstrapping...");
-
-        my $tmp = File::Temp->new();
-        $tmp->print("requires 'File::pushd', '1.005';\n");
-        $tmp->print("requires 'OrePAN2', '0.21';\n");
-        $tmp->print("requires 'IO::File::AtomicChange', '0.05';\n");
-        $tmp->print("requires 'Module::CPANfile', '1.0905';\n");
-        $tmp->close;
-
-        $self->anton->run_cmd(
-            'cpanm', '--quiet', '--dev', '--notest', '--no-man-pages',
-            '-l', 'anton/selfdeps', '--cpanfile', $tmp->filename, '--installdeps',
-            '.',
-        );
-
-        lib->import(File::Spec->rel2abs('anton/selfdeps/lib/perl5/'));
-
-        # Force reload to latest verison.
-        # 1.33 or later is required by CPAN::Meta::Converter
-        delete $INC{"List/Util.pm"};
-        require List::Util;
-
-        $self->anton->debugf("Finished bootstrapping.");
-
-        $self->anton->write_gitignore_file();
-    }
-
     sub run {
         my ($self) = @_;
         my $args = $self->{args};
@@ -552,7 +552,6 @@ package Anton::CLI {
 
 {
     my $cli = Anton::CLI->new(\@ARGV);
-    $cli->bootstrap();
     $cli->run();
 }
 
