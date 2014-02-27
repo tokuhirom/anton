@@ -32,7 +32,8 @@ BEGIN {
 use File::Spec;
 use lib File::Spec->rel2abs('anton/selfdeps/lib/perl5/');
 
-package Anton::Snapshot {
+# Find installed modules from local/
+package CPAN::Installed::Local {
     use Config;
     use JSON::PP;
     use ExtUtils::MakeMaker;
@@ -40,13 +41,11 @@ package Anton::Snapshot {
     sub new {
         my $class = shift;
         my %args = @_==1 ? %{$_[0]} : @_;
+        unless (exists $args{directory}) {
+            Carp::croak("Missing mandatory parameter: directory");
+        }
+
         bless {
-            ignore => {
-                # Imager::File::PNG included in Imager-File-PNG-XXX.tar.gz and Imager-XXX.tar.gz. Very confusing.
-                'Imager::File::JPEG' => 1,
-                'Imager::File::PNG'  => 1,
-            },
-            directory => 'local',
             %args,
         }, $class;
     }
@@ -55,7 +54,6 @@ package Anton::Snapshot {
         my $self = shift;
         sort glob("$self->{directory}/lib/perl5/$Config{archname}/.meta/*/install.json");
     }
-
 
     # Older cpanm doesn't ignore the PAUSE's default ignore files.
     #
@@ -159,6 +157,7 @@ package Anton::Snapshot {
         return $matched ? 1 : 0;
     }
 }
+# /CPAN::Installed::Local
 
 package Anton {
     use File::Spec;
@@ -420,15 +419,21 @@ package Anton {
         my $index = OrePAN2::Index->new();
         $index->no_mtime(1);
 
-        my $snapshot = Anton::Snapshot->new(
+        my $snapshot = CPAN::Installed::Local->new(
             directory => $self->{local},
         );
         my ($installed, $uninstalled) = $snapshot->aggregate();
 
+        my %ignore = (
+            # Imager::File::PNG included in Imager-File-PNG-XXX.tar.gz and Imager-XXX.tar.gz. Very confusing.
+            'Imager::File::JPEG' => 1,
+            'Imager::File::PNG'  => 1,
+        );
+
         for my $module (@$installed) {
             for my $pkg (sort keys %{$module->{provides}}) {
                 next unless $module->{provides}{$pkg}{file};
-                next if $self->{ignore}{$pkg};
+                next if $ignore{$pkg};
 
                 $index->add_index(
                     $pkg,

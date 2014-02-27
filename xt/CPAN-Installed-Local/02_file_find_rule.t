@@ -6,7 +6,9 @@ use File::pushd;
 use File::Temp;
 use FindBin;
 use Config;
+use xt::Util;
 
+# File::Find::Rule::Test::ATeam is indexed. But it's not installed.
 
 #   {
 #   "version" : "0.33",
@@ -25,26 +27,16 @@ use Config;
 #   "dist" : "File-Find-Rule-0.33"
 #   }
 
-my $anton = "$FindBin::Bin/../anton";
-
 my $dir = File::Temp::tempdir(CLEANUP => $ENV{DEBUG} ? 0 : 1);
-   $dir = pushd($dir);
 
-open my $fh, '>', 'cpanfile';
-print {$fh} "requires 'File::Find::Rule', '==0.33';\n";
-close $fh;
+install($dir, "File::Find::Rule");
 
-is system($^X, $anton, 'install'), 0;
-ok -f "local/lib/perl5/File/Find/Rule.pm";
-my $index = slurp('anton/index.txt');
-note $index;
-like $index, qr/File::Find::Rule\s+0\.33\s+/, "File::Find::Rule is indexed";
+my $local = CPAN::Installed::Local->new(directory => $dir);
+my ($installed, $uninstalled) = $local->aggregate();
+is 0+@$uninstalled, 0;
+
+my ($ffr_meta) = grep { $_->{dist} eq 'File-Find-Rule-0.33' } @$installed;
+ok $ffr_meta;
 
 done_testing;
 
-sub slurp {
-    my $fname = shift;
-    open my $fh, '<', $fname
-        or Carp::croak("Can't open '$fname' for reading: '$!'");
-    scalar(do { local $/; <$fh> })
-}
