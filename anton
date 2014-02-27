@@ -330,7 +330,7 @@ package Anton {
 
         return unless $modified_darkpan;
 
-        # write anton/darkpan.json
+        # write anton/darkpan/cache.json
         $self->atomic_write('anton/darkpan/cache.json', JSON::PP->new->pretty(1)->canonical(1)->encode($cache));
 
         # Make darkpan index.
