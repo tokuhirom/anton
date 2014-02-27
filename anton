@@ -44,18 +44,21 @@ package Anton::Snapshot {
 
     sub new {
         my $class = shift;
+        my %args = @_==1 ? %{$_[0]} : @_;
         bless {
             ignore => {
                 # Imager::File::PNG included in Imager-File-PNG-XXX.tar.gz and Imager-XXX.tar.gz. Very confusing.
                 'Imager::File::JPEG' => 1,
                 'Imager::File::PNG'  => 1,
             },
+            directory => 'local',
+            %args,
         }, $class;
     }
 
     sub json_files {
         my $self = shift;
-        sort glob("local/lib/perl5/$Config{archname}/.meta/*/install.json");
+        sort glob("$self->{directory}/lib/perl5/$Config{archname}/.meta/*/install.json");
     }
 
     sub load_json {
@@ -120,7 +123,7 @@ package Anton::Snapshot {
                 $module =~ s!::!/!g;
                 $module .= ".pm";
 
-                for my $dir ("local/lib/perl5/", "local/lib/perl5/$Config{archname}/") {
+                for my $dir ("$self->{directory}/lib/perl5/", "$self->{directory}/lib/perl5/$Config{archname}/") {
                     my $path = "$dir/$module";
                     if (-f $path) {
                         my $version = MM->parse_version($path);
@@ -386,7 +389,7 @@ package Anton {
         my ($self, %args) = @_;
 
         for my $module (@{$args{modules}}) {
-            system("cpanm", "-L", 'local', '-U', $module);
+            system("cpanm", "-L", $self->{local}, '-U', $module);
         }
 
         $self->rebuild_index;
@@ -401,7 +404,9 @@ package Anton {
         my $index = OrePAN2::Index->new();
         $index->no_mtime(1);
 
-        my $snapshot = Anton::Snapshot->new();
+        my $snapshot = Anton::Snapshot->new(
+            directory => $self->{local},
+        );
         $snapshot->aggregate($index);
         $self->atomic_write($self->index_file, $index->as_string);
     }
@@ -491,16 +496,19 @@ package Anton::CLI {
             config => [ "no_ignore_case", 'pass_through' ],
         );
         my $debug = $ENV{ANTON_DEBUG};
+        my $local = 'local';
         $p->getoptionsfromarray(
             $self->{args},
             'dry-run!'    => \my $dry_run,
             'v|verbose!'  => \my $verbose,
             'debug!'      => \$debug,
+            'local=s'     => \$local,
         );
         return Anton->new(
             dry_run => $dry_run,
             verbose => $verbose,
             debug   => $debug,
+            local   => $local,
         );
     }
 
