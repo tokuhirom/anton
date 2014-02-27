@@ -531,6 +531,7 @@ package Anton::CLI {
             "deployment!" => \$deployment,
         );
 
+        $self->anton->write_gitignore_file;
         $self->{anton}->install(
             deployment => $deployment,
         );

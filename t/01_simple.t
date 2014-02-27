@@ -17,6 +17,8 @@ close $fh;
 
 is system($^X, $anton, 'install'), 0;
 ok -f 'local/lib/perl5/Scalar/DDie.pm';
+ok -f 'anton/selfdeps/cpanfile';
+ok -f 'anton/.gitignore';
 
 done_testing;
 
