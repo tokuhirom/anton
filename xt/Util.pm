@@ -16,7 +16,7 @@ my $cpanm = which('cpanm') or die "Missing cpanm";
 
 sub install {
     my ($dir, $module) = @_;
-    system($^X, $cpanm, '--notest', '--no-man-pages', '-L', $dir, $module)==0 or Carp::croak("Cannot install $module to $dir\n");
+    system($^X, $cpanm, '--reinstall', '--notest', '--no-man-pages', '-L', $dir, $module)==0 or Carp::croak("Cannot install $module to $dir\n");
 }
 
 # Load CPAN::Installed::Local

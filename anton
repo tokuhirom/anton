@@ -37,6 +37,8 @@ package CPAN::Installed::Local {
     use Config;
     use JSON::PP;
     use ExtUtils::MakeMaker;
+    use File::Basename;
+    use constant DEBUG => $ENV{CPAN_INSTALLED_LOCAL_DEBUG};
 
     sub new {
         my $class = shift;
@@ -132,10 +134,19 @@ package CPAN::Installed::Local {
 
         FILE_LOOP:
         while (my ($file, $info) = each %file2pkgs) {
-            while (my ($package, $version) = each %$info) {
+            $file =~ s/\.PL\z//;
+
+            for my $package (sort keys %$info) {
+                my $version = $info->{$package};
+
                 my $module = $package;
                 $module =~ s!::!/!g;
                 $module .= ".pm";
+
+                if (index($module, File::Basename::basename($file)) < 0) {
+                    DEBUG && warn "file name UNMATCHEd: $file, $module\n";
+                    next;
+                }
 
                 for my $dir ("$self->{directory}/lib/perl5/", "$self->{directory}/lib/perl5/$Config{archname}/") {
                     my $path = "$dir/$module";
@@ -149,6 +160,7 @@ package CPAN::Installed::Local {
                             $matched++;
                             next FILE_LOOP;
                         } else {
+                            DEBUG && warn "DIFF $file $module!\n";
                             # Has different version
                             return 0;
                         }
