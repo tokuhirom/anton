@@ -1,0 +1,7 @@
+name = "Anton"
+badges = ["travis"]
+script_files = ["anton"]
+authority="cpan:TOKUHIROM"
+readme_from="anton"
+abstract_from="anton"
+authors_from="anton"

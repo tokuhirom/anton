@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/tokuhirom/anton.png?branch=master)](https://travis-ci.org/tokuhirom/anton)
 # NAME
 
 anton - Yet another CPAN module manager for web applications.
@@ -62,3 +63,14 @@ If anton gets an error, exit status is non-zero value.
 
 There is no \`carton exec\` equivalent subcommand.
 But you can do \`perl -Mlib::core::only -Mlib=lib/perl5/ foo.pl\`.
+
+# LICENSE
+
+Copyright (C) Tokuhiro Matsuno.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+# AUTHOR
+
+Tokuhiro Matsuno <tokuhirom@gmail.com>

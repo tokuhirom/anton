@@ -631,3 +631,15 @@ If anton gets an error, exit status is non-zero value.
 
 There is no `carton exec` equivalent subcommand.
 But you can do `perl -Mlib::core::only -Mlib=lib/perl5/ foo.pl`.
+
+=head1 LICENSE
+
+Copyright (C) Tokuhiro Matsuno.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=head1 AUTHOR
+
+Tokuhiro Matsuno E<lt>tokuhirom@gmail.comE<gt>
+
