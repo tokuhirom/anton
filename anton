@@ -95,28 +95,25 @@ package Anton::Snapshot {
     sub aggregate {
         my ($self, $index) = @_;
 
-        my %required;
-
         my @modules = (
-            grep { $self->is_installed($_) }
             grep { cleanup_data($_) }
             grep { defined $_ }
             map { load_json($_) }
             $self->json_files
         );
 
-        for my $module (@modules) {
-            for my $pkg (sort keys %{$module->{provides}}) {
-                next unless $module->{provides}{$pkg}{file};
-                next if $self->{ignore}{$pkg};
+        my @installed;
+        my @uninstalled;
 
-                $index->add_index(
-                    $pkg,
-                    $module->{provides}->{$pkg}->{version},
-                    $module->{pathname}
-                );
+        for my $module (@modules) {
+            if ($self->is_installed($module)) {
+                push @installed, $module;
+            } else {
+                push @uninstalled, $module;
             }
         }
+
+        return (\@installed, \@uninstalled);
     }
 
     sub is_installed {
@@ -426,7 +423,23 @@ package Anton {
         my $snapshot = Anton::Snapshot->new(
             directory => $self->{local},
         );
-        $snapshot->aggregate($index);
+        my ($installed, $uninstalled) = $snapshot->aggregate();
+
+        for my $module (@$installed) {
+            for my $pkg (sort keys %{$module->{provides}}) {
+                next unless $module->{provides}{$pkg}{file};
+                next if $self->{ignore}{$pkg};
+
+                $index->add_index(
+                    $pkg,
+                    $module->{provides}->{$pkg}->{version},
+                    $module->{pathname}
+                );
+            }
+        }
+
+        $self->debugf("Uninstalled: %s", join(' ', map { $_->{dist} } @$uninstalled));
+
         $self->atomic_write($self->index_file, $index->as_string);
     }
 
