@@ -49,13 +49,12 @@ If anton gets an error, exit status is non-zero value.
 
     - cpanfile
     + anton
-        - darkpan.txt
+        - index.txt (You must add this file to repository)
+        - merged.txt (temporary file)
         + darkpan
             + authors
             + dists
-        + dists
-            - 02.packages.details.txt
-        + authors
+        + mirror (cache directory)
 
 # FAQ
 

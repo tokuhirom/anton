@@ -4,9 +4,8 @@ Description:  DarkPAN
 Columns:      package name, version, path
 Intended-For: Automated fetch routines, namespace documentation.
 Written-By:   OrePAN2 0.21
-Line-Count:   27
+Line-Count:   26
 
-Acme::Kensiro          0.13                   D/DU/DUMMY/Acme-Kensiro-0.13.tar.gz
 Module::Build          0.4205                 L/LE/LEONT/Module-Build-0.4205.tar.gz
 Module::Build::Base    0.4205                 L/LE/LEONT/Module-Build-0.4205.tar.gz
 Module::Build::Compat  0.4205                 L/LE/LEONT/Module-Build-0.4205.tar.gz
