@@ -133,6 +133,8 @@ package Anton::Snapshot {
             $file2pkgs{$info->{file}}{$package} = $info->{version};
         }
 
+        my $matched = 0;
+
         FILE_LOOP:
         while (my ($file, $info) = each %file2pkgs) {
             while (my ($package, $version) = each %$info) {
@@ -148,6 +150,7 @@ package Anton::Snapshot {
                         if (
                             version->parse($dat->{provides}->{$package}{version} // 0) == version->parse($version // 0)
                         ) {
+                            $matched++;
                             next FILE_LOOP;
                         } else {
                             next;
@@ -155,9 +158,8 @@ package Anton::Snapshot {
                     }
                 }
             }
-            return 0;
         }
-        return 1;
+        return $matched ? 1 : 0;
     }
 }
 
