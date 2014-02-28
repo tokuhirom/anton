@@ -225,16 +225,15 @@ package Anton {
         $self->infof("Building merged index");
 
         require OrePAN2::Index;
-        my $index = OrePAN2::Index->new(
-            no_mtime => 1,
-        );
+        my $index = OrePAN2::Index->new();
         if (-f $self->index_file) {
             $index->load($self->index_file);
         }
         if (-f $self->darkpan_index_file) {
             $index->load($self->darkpan_index_file, { replace => 1 });
         }
-        $self->atomic_write($self->merged_index_file, $index->as_string());
+        $self->atomic_write($self->merged_index_file, $index->as_string({simple => 1}));
+        return $index;
     }
 
     sub install {
@@ -246,7 +245,7 @@ package Anton {
 
         $self->make_darkpan;
 
-        $self->build_merged_index();
+        my $merged_index = $self->build_merged_index();
 
         # Re-create local/ directory using index file.
         if (-f $self->index_file) {
@@ -263,10 +262,9 @@ package Anton {
                 '--mirror' => 'http://backpan.perl.org/',
                 '--mirror-index' => $self->merged_index_file,
                 '--mirror-only',
-                '--cpanfile' => $self->cpanfile,
                 '--save-dists' => $self->cache_dir,
                 ($self->verbose ? ('--verbose') : ()),
-                '--installdeps' => '.'
+                '--installdeps' => $merged_index->packages,
             );
         } else {
             if ($args{deployment}) {
@@ -363,7 +361,6 @@ package Anton {
 
         require OrePAN2::Index;
         my $index = OrePAN2::Index->new();
-        $index->no_mtime(1);
 
         my $snapshot = CPAN::Installed::Local->new(
             directory => $self->{local},
@@ -395,7 +392,7 @@ package Anton {
 
         $self->debugf("Uninstalled: %s", join(' ', map { $_->{dist} } @$uninstalled));
 
-        $self->atomic_write($self->index_file, $index->as_string);
+        $self->atomic_write($self->index_file, $index->as_string({simple => 1}));
     }
 
     sub run_cmd {
