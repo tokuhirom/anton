@@ -247,9 +247,11 @@ package Anton {
 
         my $merged_index = $self->build_merged_index();
 
-        # Re-create local/ directory using index file.
-        if (-f $self->index_file) {
-            printf "[anton] Installing modules with %s\n", $self->index_file;
+        # Install dependent modules, and update index file.
+        if ($args{deployment}) {
+            unless (-f $self->index_file) {
+                $self->croakf("You specified deployment mode. But there is no index file: %s", $self->index_file);
+            }
 
             $self->run_cmd(
                 "cpanm",
@@ -262,18 +264,12 @@ package Anton {
                 '--mirror' => 'http://backpan.perl.org/',
                 '--mirror-index' => $self->merged_index_file,
                 '--mirror-only',
+                '--cpanfile' => $self->cpanfile,
                 '--save-dists' => $self->cache_dir,
                 ($self->verbose ? ('--verbose') : ()),
-                '--installdeps' => $merged_index->packages,
+                '--installdeps' => '.'
             );
         } else {
-            if ($args{deployment}) {
-                die "You specified deployment mode. But there is no index file!\n";
-            }
-        }
-
-        # Install dependent modules, and update index file.
-        unless ($args{deployment}) {
             $self->run_cmd(
                 "cpanm",
                 '-L' => $self->{local},

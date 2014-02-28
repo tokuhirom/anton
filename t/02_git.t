@@ -29,7 +29,7 @@ mkpath('anton/');
 
 is system($^X, $anton, 'install'), 0;
 ok -f 'local/lib/perl5/Acme/Foo.pm';
-ok -f 'anton/darkpan/cache.json', 'darkpan/cache.json was generated';
+ok -f 'anton/darkpan/orepan2-cache.json', 'darkpan/cache.json was generated';
 ok -f 'anton/index.txt', 'index.txt was generated';
 do 'local/lib/perl5/Acme/Foo.pm';
 is $Acme::Foo::VERSION, '0.01';
