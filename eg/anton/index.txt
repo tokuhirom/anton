@@ -3,9 +3,6 @@ URL:          http://www.perl.com/CPAN/modules/02packages.details.txt
 Description:  DarkPAN
 Columns:      package name, version, path
 Intended-For: Automated fetch routines, namespace documentation.
-Written-By:   OrePAN2 0.25
-Line-Count:   28
-Last-Updated: Fri Feb 28 14:51:13 2014
 
 Acme::Kensiro          0.13                   D/DU/DUMMY/Acme-Kensiro-0.13.tar.gz
 Module::Build          0.4205                 L/LE/LEONT/Module-Build-0.4205.tar.gz

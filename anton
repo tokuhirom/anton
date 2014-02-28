@@ -16,7 +16,7 @@ BEGIN {
         or die "$cpanfile: $!";
     print {$fh} join("\n",
         "requires 'File::pushd', '1.005';",
-        "requires 'OrePAN2', '0.24';",
+        "requires 'OrePAN2', '0.27';",
         "requires 'IO::File::AtomicChange', '0.05';",
         "requires 'Module::CPANfile', '1.0905';",
     );
