@@ -16,7 +16,7 @@ BEGIN {
         or die "$cpanfile: $!";
     print {$fh} join("\n",
         "requires 'File::pushd', '1.005';",
-        "requires 'OrePAN2', '0.27';",
+        "requires 'OrePAN2', '0.28';",
         "requires 'IO::File::AtomicChange', '0.05';",
         "requires 'Module::CPANfile', '1.0905';",
     );
@@ -28,9 +28,14 @@ BEGIN {
         '.',
     );
     system(@cmd) == 0 or die "Cannot install bootstrapping deps";
+
 }
 use File::Spec;
 use lib File::Spec->rel2abs('anton/selfdeps/lib/perl5/');
+BEGIN {
+    $ENV{PATH}=File::Spec->rel2abs('anton/selfdeps/bin/') . ':' . $ENV{PATH};
+    $ENV{PERL5LIB}=File::Spec->rel2abs('anton/selfdeps/lib/perl5/') . ':' . $ENV{PERL5LIB};
+}
 
 # Find installed modules from local/
 package CPAN::Installed::Local {
@@ -177,7 +182,6 @@ package Anton {
     use File::Spec;
     use File::Temp;
     use Module::CPANfile 1.0905;
-    use OrePAN2::Repository;
 
     sub new {
         my $class = shift;
@@ -219,23 +223,6 @@ package Anton {
 
     sub cache_dir { shift->local_mirror_dir }
 
-    sub build_merged_index {
-        my $self = shift;
-
-        $self->infof("Building merged index");
-
-        require OrePAN2::Index;
-        my $index = OrePAN2::Index->new();
-        if (-f $self->index_file) {
-            $index->load($self->index_file);
-        }
-        if (-f $self->darkpan_index_file) {
-            $index->load($self->darkpan_index_file, { replace => 1 });
-        }
-        $self->atomic_write($self->merged_index_file, $index->as_string({simple => 1}));
-        return $index;
-    }
-
     sub install {
         my ($self, %args) = @_;
 
@@ -245,7 +232,13 @@ package Anton {
 
         $self->make_darkpan;
 
-        my $merged_index = $self->build_merged_index();
+        # Make merged index.
+        $self->run_cmd(
+            'orepan2-merge-index',
+            '-o', $self->merged_index_file,
+            $self->index_file,
+            $self->darkpan_index_file
+        );
 
         # Install dependent modules, and update index file.
         if ($args{deployment}) {
@@ -297,20 +290,8 @@ package Anton {
         my @repos = $self->repos_from_cpanfile('cpanfile');
         return unless @repos;
 
-        my $darkpan = OrePAN2::Repository->new(
-            directory => 'anton/darkpan',
-        );
-        $darkpan->gc;
-
-        for my $repo (@repos) {
-            unless ($darkpan->has_cache($repo)) {
-                $darkpan->inject($repo);
-            }
-        }
-        return unless $darkpan->cache->is_dirty;
-
-        $darkpan->cache->save;
-        $darkpan->make_index;
+        $self->run_cmd( 'orepan2-gc', 'anton/darkpan' );
+        $self->run_cmd( 'orepan2-inject', '--cache', @repos, 'anton/darkpan' );
     }
 
     sub repos_from_cpanfile {
