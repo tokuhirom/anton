@@ -376,8 +376,8 @@ package Anton {
     sub download_archives {
         my ($self) = @_;
 
-        my $main_index = $self->parse_index($self->index_file);
-        my $dp_index = $self->parse_index($self->darkpan_index_file);
+        my $main_index = -f $self->index_file ? $self->parse_index($self->index_file) : +{};
+        my $dp_index = -f $self->darkpan_index_file ? $self->parse_index($self->darkpan_index_file) : +{};
 
         for my $pkg (keys %$dp_index) {
             delete $main_index->{$pkg};
