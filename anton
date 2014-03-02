@@ -26,6 +26,7 @@ BEGIN {
         "requires 'OrePAN2', '0.28';",
         "requires 'IO::File::AtomicChange', '0.05';",
         "requires 'Module::CPANfile', '1.0905';",
+        "requires 'IO::Zlib', '0';",
     );
     close $fh;
 
@@ -189,6 +190,9 @@ package Anton {
     use File::Spec;
     use File::Temp;
     use Module::CPANfile 1.0905;
+    use IO::Zlib;
+    use HTTP::Tiny;
+    use Time::HiRes;
 
     sub new {
         my $class = shift;
@@ -240,14 +244,23 @@ package Anton {
         $self->make_darkpan;
 
         # Make merged index.
-        $self->run_cmd(
-            'orepan2-merge-index',
-            '-o', $self->merged_index_file,
+        my @indexes = grep { -f $_ } (
             $self->index_file,
             $self->darkpan_index_file
         );
+        $self->run_cmd(
+            'orepan2-merge-index',
+            '-o', $self->merged_index_file,
+            @indexes,
+        );
+
+        # Download archive files, first.
+        if (-f $self->index_file) {
+            $self->download_archives;
+        }
 
         # Install dependent modules, and update index file.
+        my $t0 = [Time::HiRes::gettimeofday()];
         if ($args{deployment}) {
             unless (-f $self->index_file) {
                 $self->croakf("You specified deployment mode. But there is no index file: %s", $self->index_file);
@@ -289,6 +302,7 @@ package Anton {
 
             $self->rebuild_index;
         }
+        $self->infof("Spent %s seconds for installation", Time::HiRes::tv_interval($t0));
     }
 
     sub make_darkpan {
@@ -326,6 +340,77 @@ package Anton {
         my $fh = IO::File::AtomicChange->new($filename, 'w');
         $fh->print($content);
         $fh->close(); # MUST CALL close EXPLICITLY
+    }
+
+    sub parse_index {
+        my ($self, $fname) = @_;
+
+        my $fh = do {
+            if ($fname =~ /\.gz\z/) {
+                IO::Zlib->new($fname, 'r')
+                    or die "gzip failed: $!\n";
+            } else {
+                open my $fh, '<', $fname
+                    or Carp::croak("Cannot open '$fname' for reading: $!");
+                $fh;
+            }
+        };
+
+        # skip headers
+        while (<$fh>) {
+            last unless /\S/;
+        }
+
+        my %results;
+        while (<$fh>) {
+            if (/^(\S+)\s+(\S+)\s+(.*)$/) {
+                $results{$1} = [$2 eq 'undef' ? undef : $2, $3];
+            }
+        }
+
+        close $fh;
+
+        return \%results;
+    }
+
+    sub download_archives {
+        my ($self) = @_;
+
+        my $main_index = $self->parse_index($self->index_file);
+        my $dp_index = $self->parse_index($self->darkpan_index_file);
+
+        for my $pkg (keys %$dp_index) {
+            delete $main_index->{$pkg};
+        }
+
+        my %seen;
+        my %url_map = (
+            map {
+                ("$self->{mirror}authors/id/$_" => File::Spec->catfile($self->cache_dir, "authors/id/", $_))
+            }
+            grep { $_ !~ m{\AD/DU/DUMMY/} } # Remove darkpan files
+            grep { !$seen{$_}++ }
+            map { $_->[1] }
+            values %$main_index
+        );
+
+        # Make it parallel?
+        my $t0 = [Time::HiRes::gettimeofday()];
+        my $ht = HTTP::Tiny->new();
+        my $download_cnt = 0;
+        for my $url (keys %url_map) {
+            my $outfile = $url_map{$url};
+            next if -f $outfile;
+
+            File::Path::mkpath(File::Basename::dirname($outfile));
+            $self->infof("Downloading %s to %s", $url, $outfile);
+            my $response = $ht->mirror($url, $outfile);
+            unless ( $response->{success} ) {
+                $self->croakf("%s: %s %s", $url, $response->{status}, $response->{reason});
+            }
+            $download_cnt++;
+        }
+        $self->infof("Downloaded %s files in %s sec.", $download_cnt, Time::HiRes::tv_interval($t0));
     }
 
     sub uninstall {
@@ -603,6 +688,12 @@ Path to selfdeps. anton installs dependent libraries to this directory.
 (Default: anton/selfdeps)
 
 =back
+
+=head1 Paralelize in Anton
+
+Anton supports parallelization.
+
+For now, Anton do parallel download first.
 
 =head1 FAQ
 
