@@ -2,16 +2,23 @@
 use strict;
 use warnings;
 
+our $SELFDEPS;
+
 # bootstrapping...
 #
 # Do not load any modules before bootstrapping.
+#
+# Especially, I should not load List::Util.
+# Some library requires latest List::Util.
 BEGIN {
+    $SELFDEPS = $ENV{ANTON_SELFDEPS} || 'anton/selfdeps';
+
     # mkdir -p anton/
-    mkdir 'anton';
-    mkdir 'anton/selfdeps/';
+    system("mkdir", "-p", $SELFDEPS)
+        == 0 or die "ABORT\n";
 
     # Write cpanfile for bootstrapping deps.
-    my $cpanfile = 'anton/selfdeps/cpanfile';
+    my $cpanfile = "${SELFDEPS}/cpanfile";
     open my $fh, '>', $cpanfile
         or die "$cpanfile: $!";
     print {$fh} join("\n",
@@ -24,17 +31,17 @@ BEGIN {
 
     my @cmd = (
         'cpanm', '--quiet', '--dev', '--notest', '--no-man-pages',
-        '-l', 'anton/selfdeps', '--cpanfile', $cpanfile, '--installdeps',
+        '-l', $SELFDEPS, '--cpanfile', $cpanfile, '--installdeps',
         '.',
     );
     system(@cmd) == 0 or die "Cannot install bootstrapping deps";
 
 }
 use File::Spec;
-use lib File::Spec->rel2abs('anton/selfdeps/lib/perl5/');
+use lib File::Spec->rel2abs("${SELFDEPS}/lib/perl5/");
 BEGIN {
-    $ENV{PATH}=File::Spec->rel2abs('anton/selfdeps/bin/') . ':' . $ENV{PATH};
-    $ENV{PERL5LIB}=File::Spec->rel2abs('anton/selfdeps/lib/perl5/') . ':' . $ENV{PERL5LIB};
+    $ENV{PATH}=File::Spec->rel2abs("${SELFDEPS}/bin/") . ':' . $ENV{PATH};
+    $ENV{PERL5LIB}=File::Spec->rel2abs("${SELFDEPS}/lib/perl5/") . ':' . $ENV{PERL5LIB};
 }
 
 # Find installed modules from local/
@@ -584,6 +591,18 @@ If anton gets an error, exit status is non-zero value.
             + authors
             + dists
         + mirror (cache directory)
+
+=head1 Environment variables
+
+=over 4
+
+=item ANTON_SELFDEPS
+
+Path to selfdeps. anton installs dependent libraries to this directory.
+
+(Default: anton/selfdeps)
+
+=back
 
 =head1 FAQ
 
