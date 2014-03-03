@@ -406,6 +406,7 @@ package Anton {
             $self->infof("Downloading %s to %s", $url, $outfile);
             my $response = $ht->mirror($url, $outfile);
             unless ( $response->{success} ) {
+                # TODO: fallback to backpan
                 $self->croakf("%s: %s %s", $url, $response->{status}, $response->{reason});
             }
             $download_cnt++;
