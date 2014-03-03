@@ -86,6 +86,13 @@ package CPAN::Installed::Local {
             if ($info->{file} =~ qr!^(?:x?t|inc|local|perl5|fatlib)/!) {
                 delete $dat->{provides}{$key};
             }
+
+            # OrePAN2 does not include provides section in META.json
+            #
+            # Remove this hack after release OrePAN2 0.29.
+            if ($info->{file} =~ qr!^(?:_build)/!) {
+                delete $dat->{provides}{$key};
+            }
         }
 
         $dat;
