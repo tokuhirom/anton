@@ -1,0 +1,5 @@
+requires 'Amon2';
+requires 'Imager';
+requires 'Imager::File::PNG';
+requires 'File::RotateLogs';
+requires 'Log::Minimal';
