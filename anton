@@ -371,8 +371,12 @@ package Anton {
                 next unless $module->{provides}{$pkg}{file};
                 next if $ignore{$pkg};
 
-                if ($index->lookup($pkg)) {
-                    $self->croakf("${pkg} is already indexed.");
+                if (my ($version, $file) = $index->lookup($pkg)) {
+                    if (defined($version)) {
+                        $self->croakf("${pkg} is already indexed in ${file}.");
+                    } else {
+                        $self->infof("${pkg} is already indexed in ${file}. But, it doesn't have a version number.. I'll updating...");
+                    }
                 }
 
                 $index->add_index(
